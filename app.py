@@ -10,6 +10,7 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 import json
+import uvicorn
 
 
 load_dotenv()
@@ -59,7 +60,7 @@ async def tool_node(state):
         tool_id = tool_call["id"]
 
         # Handle the search tool
-        if tool_name == "tavily_search_results_json":
+        if tool_name == "tavily_search":
             # Execute the search tool with the provided arguments
             search_results = await search_tool.ainvoke(tool_args)
 
@@ -160,7 +161,7 @@ async def generate_chat_responses(message: str, checkpoint_id: Optional[str] = N
 
             if search_calls:
                 # Signal that a search is starting
-                search_query = search_calls[0]["arguments"].get("query", "")
+                search_query = search_calls[0]["args"].get("query", "")
                 # Escape quotes and special characters
                 safe_query = (
                     search_query.replace('"', '\\"')
@@ -169,18 +170,15 @@ async def generate_chat_responses(message: str, checkpoint_id: Optional[str] = N
                 )
                 yield f'data: {{"type": "search_start", "query": "{safe_query}"}}\n\n'
 
-        elif (
-            event_type == "on_tool_end"
-            and event["name"] == "tavily_search_results_json"
-        ):
+        elif event_type == "on_tool_end" and event["name"] == "tavily_search":
             # Search completed - send results or error
-            output = event["data"]["output"]
+            results = event["data"]["output"]["results"]
 
             # Check if output is a list
-            if isinstance(output, list):
+            if isinstance(results, list):
                 # Extract URLs from list of search results
                 urls = []
-                for item in output:
+                for item in results:
                     if isinstance(item, dict) and "url" in item:
                         urls.append(item["url"])
 
@@ -192,7 +190,7 @@ async def generate_chat_responses(message: str, checkpoint_id: Optional[str] = N
     yield f'data: {{"type": "end"}}\n\n'
 
 
-@app.get("/chat_stream/{message}")
+@app.post("/chat_stream")
 async def chat_stream(message: str, checkpoint_id: Optional[str] = Query(None)):
     return StreamingResponse(
         generate_chat_responses(message, checkpoint_id), media_type="text/event-stream"
@@ -200,6 +198,4 @@ async def chat_stream(message: str, checkpoint_id: Optional[str] = Query(None)):
 
 
 if __name__ == "__main__":
-    import uvicorn
-
     uvicorn.run(app, host="127.0.0.1", port=8000)
